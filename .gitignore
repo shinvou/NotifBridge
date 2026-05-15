@@ -1,0 +1,15 @@
+## Build artifacts
+Build/
+ios/Build/
+macos/Build/
+DerivedData/
+*.xcuserstate
+
+## xcodegen output (regenerate from project.yml)
+*.xcodeproj/
+
+## Local docs / working notes
+docs/
+
+## macOS
+.DS_Store

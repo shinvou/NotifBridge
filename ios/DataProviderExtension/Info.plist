@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleDevelopmentRegion</key>
+    <string>$(DEVELOPMENT_LANGUAGE)</string>
+    <key>CFBundleExecutable</key>
+    <string>$(EXECUTABLE_NAME)</string>
+    <key>CFBundleIdentifier</key>
+    <string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+    <key>CFBundleName</key>
+    <string>$(PRODUCT_NAME)</string>
+    <key>CFBundlePackageType</key>
+    <string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>EXAppExtensionAttributes</key>
+    <dict>
+        <key>EXExtensionPointIdentifier</key>
+        <string>com.apple.accessory-data-provider</string>
+        <key>EXCapabilities</key>
+        <array>
+            <string>AccessoryNotifications.NotificationsForwarding</string>
+        </array>
+    </dict>
+    <key>NSAccessorySetupKitSupports</key>
+    <array>
+        <string>Bluetooth</string>
+    </array>
+    <key>NSAccessorySetupBluetoothServices</key>
+    <array>
+        <string>D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C44</string>
+    </array>
+    <key>NSAccessorySetupBluetoothNames</key>
+    <array>
+        <string>NotifBdg</string>
+    </array>
+</dict>
+</plist>

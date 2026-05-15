@@ -1,0 +1,103 @@
+name: NotifBridge-iOS
+
+options:
+  bundleIdPrefix: com.shinvou
+  deploymentTarget:
+    iOS: "26.5"
+  createIntermediateGroups: true
+  generateEmptyDirectories: true
+  groupSortPosition: top
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.5"
+    TARGETED_DEVICE_FAMILY: "1,2"
+    CODE_SIGN_STYLE: Automatic
+    DEVELOPMENT_TEAM: N8YZB43954       # Timm Kandziora (shinvou@gmail.com)
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_STRICT_CONCURRENCY: targeted
+    GENERATE_INFOPLIST_FILE: NO
+
+targets:
+  NotifBridge:
+    type: application
+    platform: iOS
+    sources:
+      - path: NotifBridge
+        excludes:
+          - Info.plist
+          - "*.entitlements"
+      - path: ../shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shinvou.NotifBridge
+        INFOPLIST_FILE: NotifBridge/Info.plist
+        CODE_SIGN_ENTITLEMENTS: NotifBridge/NotifBridge.entitlements
+        SWIFT_EMIT_LOC_STRINGS: YES
+    dependencies:
+      - target: DataProviderExtension
+      - target: TransportSecurityExtension
+      - target: TransportAppExtension
+
+  DataProviderExtension:
+    type: extensionkit-extension
+    platform: iOS
+    sources:
+      - path: DataProviderExtension
+        excludes:
+          - Info.plist
+          - "*.entitlements"
+      - path: ../shared
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shinvou.NotifBridge.DataProvider
+        INFOPLIST_FILE: DataProviderExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: DataProviderExtension/DataProviderExtension.entitlements
+        PRODUCT_NAME: DataProviderExtension
+
+  TransportSecurityExtension:
+    type: extensionkit-extension
+    platform: iOS
+    sources:
+      - path: TransportSecurityExtension
+        excludes:
+          - Info.plist
+          - "*.entitlements"
+      - path: ../shared
+      - path: AccessoryBLEWriter.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shinvou.NotifBridge.Security
+        INFOPLIST_FILE: TransportSecurityExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TransportSecurityExtension/TransportSecurityExtension.entitlements
+        PRODUCT_NAME: TransportSecurityExtension
+
+  TransportAppExtension:
+    type: extensionkit-extension
+    platform: iOS
+    sources:
+      - path: TransportAppExtension
+        excludes:
+          - Info.plist
+          - "*.entitlements"
+      - path: ../shared
+      - path: AccessoryBLEWriter.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shinvou.NotifBridge.Transport
+        INFOPLIST_FILE: TransportAppExtension/Info.plist
+        CODE_SIGN_ENTITLEMENTS: TransportAppExtension/TransportAppExtension.entitlements
+        PRODUCT_NAME: TransportAppExtension
+
+schemes:
+  NotifBridge:
+    build:
+      targets:
+        NotifBridge: all
+        DataProviderExtension: all
+        TransportSecurityExtension: all
+        TransportAppExtension: all
+    run:
+      config: Debug
+      executable: NotifBridge
