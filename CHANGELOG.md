@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1
+
+- Restart pending iPhone transfers when the Mac reconnects and confirms its Bluetooth subscriptions.
+- Allow previously unseen delayed notifications to alert when Show quiet notifications is enabled, while suppressing duplicate alerts.
+- Hide the Dock icon when the notification inbox closes, keeping the menu-bar app running.
+- Make Bluetooth restoration and security-exchange regression tests wait for observable completion.
+
 ## 1.0.0
 
 First source release of the ESP32-backed iPhone-to-Mac notification bridge.
