@@ -52,25 +52,32 @@ enum DemoGATT {
 @MainActor final class ResultBox { var completed = false }
 @main struct Tests {
     @MainActor static func main() async throws {
+        func waitUntil(_ condition: () -> Bool) async throws {
+            let deadline = Date().addingTimeInterval(5)
+            while !condition() {
+                precondition(Date() < deadline, "timed out waiting for the expected security transition")
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         let journal = KeyExchangeJournal(url: url)
         defer { try? FileManager.default.removeItem(at: url) }
         let session = AccessorySecuritySession()
         let handler = SecurityEventHandler(session: session, journal: journal)
         precondition(session.sent == 0, "must not publish before Mac preparation")
-        try await Task.sleep(for: .milliseconds(30))
+        try await waitUntil { AccessoryBLEWriter.instances.first?.receiptID != nil }
         let writer = AccessoryBLEWriter.instances[0]
         precondition(session.sent == 0, "BLE prepare write alone must not publish key")
         precondition(try! journal.load()?.phase == .prepare, "preparation must survive extension termination")
         writer.onMessage?(try JSONEncoder().encode(DeliveryReceipt(id: writer.receiptID!)))
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitUntil { session.sent == 1 }
         precondition(session.sent == 1)
         let result = ResultBox()
         handler.messageReceived(SecurityMessage(keyType: .encapsulatedKey, cipherSuite: .xWing, version: .version1, key: Data(repeating: 1, count: 1120))) { outcome in
             guard case .success = outcome else { fatalError("key delivery failed") }
             Task { @MainActor in result.completed = true }
         }
-        try await Task.sleep(for: .milliseconds(30))
+        try await waitUntil { (try? journal.load())?.phase == .activate }
         precondition(!result.completed, "activation BLE write alone must not complete exchange")
         let saved = try journal.load()!
         precondition(saved.phase == .activate && saved.publicKey == nil && saved.privateKeySeed == nil)
@@ -78,23 +85,23 @@ enum DemoGATT {
         // A fresh handler must replay activation before advertising another key.
         let replacementSession = AccessorySecuritySession()
         let replacement = SecurityEventHandler(session: replacementSession, journal: journal)
-        try await Task.sleep(for: .milliseconds(30))
+        try await waitUntil { AccessoryBLEWriter.instances.count == 2 && AccessoryBLEWriter.instances[1].receiptID == saved.receiptID }
         let replacementWriter = AccessoryBLEWriter.instances[1]
         precondition(replacementSession.sent == 0 && replacementWriter.receiptID == saved.receiptID)
         replacementWriter.onMessage?(try JSONEncoder().encode(DeliveryReceipt(id: saved.receiptID)))
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitUntil { (try? journal.load())?.phase == .prepare && replacementWriter.receiptID != saved.receiptID }
         precondition(try! journal.load()?.phase == .prepare, "confirmed activation must advance to new preparation")
         precondition(replacementSession.sent == 0, "new preparation still requires a Mac receipt")
         replacementWriter.onMessage?(try JSONEncoder().encode(DeliveryReceipt(id: replacementWriter.receiptID!)))
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitUntil { replacementSession.sent == 1 }
         precondition(replacementSession.sent == 1)
         // Resolve the original fake process without letting it clear the new journal.
         writer.onMessage?(try JSONEncoder().encode(DeliveryReceipt(id: saved.receiptID)))
-        try await Task.sleep(for: .milliseconds(150))
+        try await waitUntil { result.completed }
         precondition(result.completed && (try! journal.load()) != nil)
         replacement.sessionInvalidated(error: nil)
         handler.sessionInvalidated(error: nil)
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitUntil { writer.stopped && replacementWriter.stopped }
         precondition(writer.stopped && replacementWriter.stopped)
         print("PASS: prepare-before-publish, durable activation replay after termination, stale receipt isolation, cleanup")
     }
