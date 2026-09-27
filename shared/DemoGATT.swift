@@ -1,19 +1,25 @@
 import CoreBluetooth
 
-/// Shared protocol constants between the iPhone app/extensions and the Mac receiver.
-/// Generated UUIDs — replace if you change the service identity in your accessory firmware.
+/// Shared protocol constants. ESP32 bridges iPhone ↔ Mac:
+///   iPhone (central, ASK) ──WRITE──▶ ESP32 (peripheral) ──NOTIFY──▶ Mac (central)
+/// ESP32 firmware mirrors these UUIDs in esp32/include/demo_gatt.h.
 enum DemoGATT {
-    /// Primary GATT service the Mac receiver advertises and the iPhone discovers via ASK.
     nonisolated(unsafe) static let service = CBUUID(string: "D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C44")
 
-    /// Write by iPhone Security ext: chunked ShareKeyEvent JSON (keyMaterial + privKey + pubKey).
-    /// Bracketed by `--START--` and `--END--` ASCII sentinels.
+    /// iPhone → ESP32: chunked ShareKeyEvent JSON, sentinel-bracketed.
     nonisolated(unsafe) static let keySharing = CBUUID(string: "D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C46")
-
-    /// Write by iPhone Transport ext: encrypted notification message bytes (AES-GCM via HPKE-derived secret).
-    /// Bracketed by `--START--` and `--END--` ASCII sentinels.
+    /// iPhone → ESP32: chunked NotificationEnvelope JSON, sentinel-bracketed.
     nonisolated(unsafe) static let notification = CBUUID(string: "D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C47")
 
-    /// Substring used by the Mac receiver when advertising local name.
+    /// ESP32 → Mac: chunks re-emitted from iPhone keys writes.
+    nonisolated(unsafe) static let keySharingNotify = CBUUID(string: "D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C48")
+    /// ESP32 → Mac: chunks re-emitted from iPhone notif writes.
+    nonisolated(unsafe) static let notificationNotify = CBUUID(string: "D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C49")
+
+    /// Mac → ESP32: reverse-channel command writes (chunked + sentinels).
+    nonisolated(unsafe) static let reverseWrite = CBUUID(string: "D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C4A")
+    /// ESP32 → iPhone: reverse-channel notify chunks (iPhone extension subscribes).
+    nonisolated(unsafe) static let reverseNotify = CBUUID(string: "D5E12B7A-7D8E-4F12-9B5C-3F0A1E6D8C4B")
+
     static let advertisedNameSubstring = "NotifBdg"
 }

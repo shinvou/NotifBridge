@@ -13,3 +13,13 @@ docs/
 
 ## macOS
 .DS_Store
+
+## Private development notes and signing overrides
+.planning/
+CRITICAL_BUG.md
+*.local.xcconfig
+*.log
+*.logarchive/
+*.xcresult/
+
+.venv/

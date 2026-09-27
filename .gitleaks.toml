@@ -1,0 +1,7 @@
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "CryptoKit type declaration, not a credential"
+regexTarget = "line"
+regexes = ['''^\s*let privateKey: XWingMLKEM768X25519\.PrivateKey\s*$''']

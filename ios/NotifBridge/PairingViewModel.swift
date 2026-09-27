@@ -2,7 +2,6 @@ import Foundation
 import SwiftUI
 import AccessorySetupKit
 import AccessoryNotifications
-import AccessoryLiveActivities
 import AccessoryTransportExtension
 import CoreBluetooth
 
@@ -15,6 +14,12 @@ private func L(_ msg: String) {
 @Observable
 @MainActor
 final class PairingViewModel {
+    // Eagerly activate ASAccessorySession on init so the accessory connects
+    // at launch. Auto-refresh of forwardingStatus on session events is
+    // deliberately NOT done (would add another DADeviceChanged wave that
+    // racing with the NotificationsForwarding XPC dispatch correlated with
+    // `DAExtensionEvent init bad type: 42` decode failures). `refreshStatus`
+    // only runs on explicit user action now.
     private let session = ASAccessorySession()
 
     var accessory: ASAccessory?
@@ -23,7 +28,7 @@ final class PairingViewModel {
     var lastError: String?
 
     init() {
-        L("init — activating ASAccessorySession")
+        L("init — activating ASAccessorySession (no auto-status-refresh)")
         session.activate(on: DispatchQueue.main) { [weak self] event in
             L("session event raw — \(event.eventType.rawValue)")
             Task { @MainActor in self?.handle(event) }
@@ -39,10 +44,11 @@ final class PairingViewModel {
         switch event.eventType {
         case .activated:
             L("  .activated — accessories.count=\(session.accessories.count)")
-            setAccessoryAndRefreshStatus(session.accessories.first, reason: "activated")
-            L("  → accessory=\(accessory?.displayName ?? "nil")")
+            // No auto-refresh: just record. refreshStatus only on explicit
+            // user action or after requestForwarding completes.
+            setAccessory(session.accessories.first)
         case .accessoryAdded, .accessoryChanged:
-            setAccessoryAndRefreshStatus(event.accessory ?? session.accessories.first, reason: "added/changed")
+            setAccessory(event.accessory ?? session.accessories.first)
             L("  .added/changed → accessory=\(accessory?.displayName ?? "nil")")
         case .accessoryRemoved:
             L("  .removed")
@@ -69,21 +75,13 @@ final class PairingViewModel {
         }
     }
 
-    private func setAccessoryAndRefreshStatus(_ newAccessory: ASAccessory?, reason: String) {
+    private func setAccessory(_ newAccessory: ASAccessory?) {
         let oldIdentifier = accessory?.bluetoothIdentifier
         accessory = newAccessory
-
-        guard let accessory else {
+        if let acc = newAccessory, oldIdentifier != acc.bluetoothIdentifier {
             decision = nil
-            return
-        }
-
-        if oldIdentifier != accessory.bluetoothIdentifier {
+        } else if newAccessory == nil {
             decision = nil
-        }
-
-        Task { [weak self] in
-            await self?.refreshStatus(reason: "session \(reason)")
         }
     }
 
@@ -113,6 +111,10 @@ final class PairingViewModel {
 
     func requestForwarding() async {
         L("requestForwarding() called accessory=\(accessory?.displayName ?? "nil")")
+        if accessory == nil, let cached = session.accessories.first {
+            accessory = cached
+            L("  seeded accessory from cache → \(cached.displayName)")
+        }
         guard let accessory else {
             L("  no accessory; aborting")
             return
@@ -146,7 +148,11 @@ final class PairingViewModel {
     func diagnose() async {
         L("=== DIAG ===")
         L("NotificationsForwarding.featureID = \"\(NotificationsForwarding.featureID)\"")
-        L("LiveActivityForwarding.featureID  = \"\(LiveActivityForwarding.featureID)\"")
+        // LiveActivityForwarding probing intentionally removed: calling
+        // LiveActivityForwarding.authorization(forAccessory:) triggers a
+        // DADeviceEvent loop with CapFl 0x8 that races with the
+        // NotificationsForwarding XPC dispatch and may correlate with the
+        // `DAExtensionEvent init bad type: 42` decode failure we're chasing.
         guard let accessory else {
             L("no accessory bonded")
             return
@@ -156,12 +162,6 @@ final class PairingViewModel {
             L("AccessoryNotificationCenter.forwardingStatus = \(notifStatus)")
         } catch {
             L("notif status error: \(error.localizedDescription)")
-        }
-        do {
-            let laAuth = try await LiveActivityForwarding.authorization(forAccessory: accessory)
-            L("LiveActivityForwarding.authorization = \(laAuth)")
-        } catch {
-            L("LA auth error: \(error.localizedDescription) [\((error as NSError).domain) \((error as NSError).code)]")
         }
         L("=== END DIAG ===")
     }

@@ -19,6 +19,7 @@ struct ContentView: View {
                     Button("Send test notification") {
                         Task { await sendTestNotification() }
                     }
+                    .accessibilityIdentifier("send-test-notification-button")
                     if let testNotificationStatus {
                         Text(testNotificationStatus)
                             .font(.footnote)
@@ -31,11 +32,13 @@ struct ContentView: View {
                         Task { await model.pair() }
                     }
                     .disabled(model.accessory != nil)
+                    .accessibilityIdentifier("pair-accessory-button")
 
                     Button("Request notification forwarding") {
                         Task { await model.requestForwarding() }
                     }
                     .disabled(model.accessory == nil)
+                    .accessibilityIdentifier("request-forwarding-button")
 
                     Button("Refresh status") {
                         Task { await model.refreshStatus() }
@@ -65,11 +68,9 @@ struct ContentView: View {
     private func sendTestNotification() async {
         do {
             let center = UNUserNotificationCenter.current()
-            let granted = try await center.requestAuthorization(options: [.alert, .sound])
-            guard granted else {
-                testNotificationStatus = "Notification permission denied"
-                return
-            }
+            // No requestAuthorization here — NotifBridgeApp already requested
+            // `.provisional` at init which silently grants. Re-requesting would
+            // pop a system alert that blocks the notif scheduling.
             let content = UNMutableNotificationContent()
             content.title = "NotifBridge test"
             content.body = "Local notification \(Date().formatted(date: .omitted, time: .standard))"

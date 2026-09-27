@@ -1,24 +1,25 @@
 import AccessoryTransportExtension
 import ExtensionFoundation
 import Foundation
+import os
+
+private let secMainLog = Logger(subsystem: "com.shinvou.NotifBridge", category: "sec-ext-main")
 
 @main
 struct TransportSecurity: AccessoryTransportSecurity {
     init() {
-        print("[SEC-EXT] TransportSecurity init")
-        NSLog("[SEC-EXT] TransportSecurity init")
+        secMainLog.notice("TransportSecurity init pid=\(ProcessInfo.processInfo.processIdentifier, privacy: .public)")
     }
 
     @AppExtensionPoint.Bind
-    var extensionPoint: AppExtensionPoint {
+    static var boundExtensionPoint: AppExtensionPoint {
         AppExtensionPoint.Identifier("com.apple.accessory-transport-security")
     }
 
     func accept(
         sessionRequest req: AccessorySecuritySession.Request
     ) -> AccessorySecuritySession.Request.Decision {
-        print("[SEC-EXT] accept sessionRequest session=\(req.session)")
-        NSLog("[SEC-EXT] accept sessionRequest")
+        secMainLog.notice("accept sessionRequest")
         return req.accept { SecurityEventHandler(session: req.session) }
     }
 }

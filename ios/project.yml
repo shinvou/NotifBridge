@@ -14,7 +14,7 @@ settings:
     IPHONEOS_DEPLOYMENT_TARGET: "26.5"
     TARGETED_DEVICE_FAMILY: "1,2"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: N8YZB43954       # Timm Kandziora (shinvou@gmail.com)
+    DEVELOPMENT_TEAM: "" # Set your Apple Developer team when building.
     ENABLE_USER_SCRIPT_SANDBOXING: YES
     SWIFT_STRICT_CONCURRENCY: targeted
     GENERATE_INFOPLIST_FILE: NO
@@ -35,6 +35,7 @@ targets:
         INFOPLIST_FILE: NotifBridge/Info.plist
         CODE_SIGN_ENTITLEMENTS: NotifBridge/NotifBridge.entitlements
         SWIFT_EMIT_LOC_STRINGS: YES
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
     dependencies:
       - target: DataProviderExtension
       - target: TransportSecurityExtension
@@ -90,6 +91,21 @@ targets:
         CODE_SIGN_ENTITLEMENTS: TransportAppExtension/TransportAppExtension.entitlements
         PRODUCT_NAME: TransportAppExtension
 
+  NotifBridgeUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: NotifBridgeUITests
+        excludes:
+          - Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.shinvou.NotifBridgeUITests
+        INFOPLIST_FILE: NotifBridgeUITests/Info.plist
+        TEST_TARGET_NAME: NotifBridge
+    dependencies:
+      - target: NotifBridge
+
 schemes:
   NotifBridge:
     build:
@@ -98,6 +114,11 @@ schemes:
         DataProviderExtension: all
         TransportSecurityExtension: all
         TransportAppExtension: all
+        NotifBridgeUITests: all
     run:
       config: Debug
       executable: NotifBridge
+    test:
+      config: Debug
+      targets:
+        - NotifBridgeUITests

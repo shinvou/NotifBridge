@@ -12,7 +12,7 @@ settings:
     SWIFT_VERSION: "6.0"
     MACOSX_DEPLOYMENT_TARGET: "26.0"
     CODE_SIGN_STYLE: Automatic
-    DEVELOPMENT_TEAM: N8YZB43954
+    DEVELOPMENT_TEAM: "" # Set your Apple Developer team when building.
     GENERATE_INFOPLIST_FILE: NO
     ENABLE_HARDENED_RUNTIME: YES
     SWIFT_STRICT_CONCURRENCY: targeted
@@ -26,11 +26,12 @@ targets:
         excludes:
           - Info.plist
           - "*.entitlements"
+          - Assets.xcassets
       - path: ../shared
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.shinvou.NotifBridge.Mac
         INFOPLIST_FILE: NotifBridge/Info.plist
         CODE_SIGN_ENTITLEMENTS: NotifBridge/NotifBridge.entitlements
-        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_APPICON_NAME: NotifBridgeIcon
         ENABLE_USER_SCRIPT_SANDBOXING: YES

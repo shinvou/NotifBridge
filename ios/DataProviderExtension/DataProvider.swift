@@ -6,8 +6,10 @@ import Foundation
 @main
 struct DataProvider: AccessoryDataProvider {
     init() {
-        print("[DP-EXT] DataProvider init (notif-only, instance extensionPoint)")
-        NSLog("[DP-EXT] DataProvider init (notif-only, instance extensionPoint)")
+        let stamp = ISO8601DateFormatter().string(from: Date())
+        let pid = ProcessInfo.processInfo.processIdentifier
+        print("[DP-EXT] DataProvider init @ \(stamp) pid=\(pid)")
+        NSLog("[DP-EXT] DataProvider init @ %@ pid=%d", stamp, pid)
     }
 
     @AppExtensionPoint.Bind
@@ -15,8 +17,9 @@ struct DataProvider: AccessoryDataProvider {
         AppExtensionPoint.Identifier("com.apple.accessory-data-provider")
         AppExtensionPoint.Capabilities {
             NotificationsForwarding {
-                print("[DP-EXT] NotificationHandler factory CALLED")
-                NSLog("[DP-EXT] NotificationHandler factory CALLED")
+                let stamp = ISO8601DateFormatter().string(from: Date())
+                print("[DP-EXT] NotificationHandler factory CALLED @ \(stamp)")
+                NSLog("[DP-EXT] NotificationHandler factory CALLED @ %@", stamp)
                 return NotificationHandler()
             }
         }

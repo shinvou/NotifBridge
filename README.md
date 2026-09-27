@@ -1,282 +1,192 @@
 # NotifBridge
 
-iOS 26.5 `AccessoryNotifications` + `AccessoryTransportExtension` demo with a
-Mac acting as a custom Bluetooth LE accessory. Goal: iPhone notification
-transport bytes to Mac receiver over BLE.
+<img src="ios/NotifBridge/Assets.xcassets/AppIcon.appiconset/AppIcon.png" width="96" height="96" alt="NotifBridge app icon">
 
-```
-iPhone (iOS 26.5+)                                      Mac (macOS 26+)
--------------------                                      ----------------
+**Your iPhone notifications, on your Mac — through a Bluetooth relay.**
 
- NotifBridge app
- - ASK picker/status
- - forwarding request
-        |
-        | pairs with advertised BLE service
-        v
- AccessoryNotifications
-        |
-        +--> DataProviderExtension
-        |    - add/update/remove callbacks
-        |    - serializes title/body/source/id
-        |    - session.send(AccessoryMessage)
-        |
-        +--> TransportSecurityExtension
-        |    - generates XWing public/private key
-        |    - receives encapsulated key from system
-        |    - writes ShareKeyEvent JSON
-        |          |
-        |          | BLE GATT write:
-        |          | D5E1...8C46 keySharing
-        |          v
-        +--> TransportAppExtension
-             - receives encrypted TransportMessage
-             - wraps ciphertext + sessionID
-             - writes NotificationEnvelope JSON
-                   |
-                   | BLE GATT write:
-                   | D5E1...8C47 notification
-                   v
-                                                    CBPeripheralManager
-                                                    - advertises D5E1...8C44
-                                                    - name contains "NotifBdg"
-                                                    - reassembles chunks
-                                                           |
-                                                           v
-                                                    HPKEDecryptor
-                                                    - derives AES-GCM key
-                                                    - decrypts payload
-                                                           |
-                                                           v
-                                                    ReceiverModel / SwiftUI
-                                                    - lists notifications
-                                                    - posts local Mac banner
-```
+NotifBridge forwards notifications from an iPhone to native macOS banners and
+Notification Center, with supported replies and actions sent back to the phone.
+It uses Apple's accessory frameworks and an ESP32 relay; iPhone Mirroring is not
+required.
+
+**v1 is a source release for developers and hardware tinkerers.** You need an
+ESP32, a compatible iPhone and Mac, and Apple signing/provisioning access. There
+is no prebuilt, notarized installer or App Store distribution.
+
+## Features
+
+- Native macOS notifications with the source app's icon where supported.
+- Reply and other actions when provided by the originating iPhone app.
+- **Clear on iPhone** clears the phone notification and removes the Mac entry on
+  confirmation. **X** dismisses only the Mac notification.
+- iPhone removal events dismiss the corresponding Mac notifications.
+- A menu-bar app with sound, quiet-notification and launch-at-login preferences.
+- A chronological inbox with search, app filters, per-app muting, rich content,
+  attachment previews/export and optional cleared history.
+- Bluetooth reconnection, acknowledged delivery, duplicate suppression and
+  recovery from interrupted key exchange.
+
+The menu's **Test notification** is a local preview, not an iPhone delivery test.
+It intentionally has no iPhone actions.
 
 ## Requirements
 
-1. **iPhone Apple Account region = EU**. `AccessoryNotificationCenter` can throw
-   `unsupportedPlatform` outside the EU. This is Apple/DMA scoped.
-2. **Real iPhone on iOS 26.5+**. Simulator cannot exercise Bluetooth or
-   AccessorySetupKit pairing.
-3. **No active Apple Watch notification target** while testing, or Watch
-   notifications must be disabled. iOS enforces one notification target at a
-   time.
-4. **Mac with Bluetooth** running macOS 26.0+.
-5. **Apple Developer Program membership** with the gated split entitlements:
-   - `com.apple.developer.accessory-data-provider`
-   - `com.apple.developer.accessory-transport-security`
-   - `com.apple.developer.accessory-transport-extension`
-6. **Correct extension plist metadata**:
-   - all three extensions declare `NSAccessorySetupKitSupports = ["Bluetooth"]`
-   - all three declare `NSAccessorySetupBluetoothServices`
-   - all three declare `NSAccessorySetupBluetoothNames`
-   - `TransportAppExtension` exports a UTI conforming to
-     `public.data-access-protocol`
+| Component | Requirement |
+| --- | --- |
+| iPhone | Real device running iOS 26.5 or newer; eligible for Apple's accessory notification forwarding |
+| Mac | macOS 26 or newer with Bluetooth; automated tests currently target Apple silicon |
+| Relay | ESP32 compatible with PlatformIO's `esp32dev` board, powered over USB |
+| Tools | Xcode with the iOS 26.5+ SDK and XWing CryptoKit APIs, XcodeGen, PlatformIO |
+| Signing | Apple Developer team and provisioning for the accessory extension entitlements |
 
-## Layout
+Development has been performed with Xcode 27 and an iPhone 17. Simulator builds
+cannot validate pairing or notification forwarding. Apple's regional/account
+eligibility and notification-target restrictions apply; development was tested
+with an EU account. Check [Apple's accessory notification documentation](https://developer.apple.com/documentation/accessorytransportextension/receiving-ios-notifications-on-an-accessory)
+before buying hardware or applying for entitlements. An active Apple Watch
+notification target can affect forwarding eligibility.
 
-```
-~/dev/NotifBridge/
-├── README.md                              ← you are here
-├── docs/
-│   └── FINDINGS.md                        ← detailed deep-dive incl. HPKE strategy
-├── shared/
-│   └── DemoGATT.swift                     ← GATT UUIDs (iOS + Mac)
-├── ios/
-│   ├── project.yml                        ← xcodegen for iOS app + 3 extensions
-│   ├── NotifBridge-iOS.xcodeproj          ← generated
-│   ├── AccessoryBLEWriter.swift           ← extension-side CBCentral writer (iOS-only)
-│   ├── NotifBridge/                       ← companion SwiftUI app
-│   ├── DataProviderExtension/             ← receives notifications, serializes
-│   ├── TransportSecurityExtension/        ← XWing key exchange relay
-│   └── TransportAppExtension/             ← encrypted payload BLE relay
-├── macos/
-│   ├── project.yml                        ← xcodegen for Mac app
-│   ├── NotifBridge-macOS.xcodeproj        ← generated
-│   └── NotifBridge/                       ← SwiftUI + CBPeripheralManager + HPKE decrypt
-└── scripts/
-    └── test-e2e.sh                        ← automated end-to-end regression
+## Build and set up
+
+### 1. Clone and install tools
+
+```sh
+git clone https://github.com/shinvou/NotifBridge.git
+cd NotifBridge
+brew install xcodegen
+python3 -m venv .venv
+.venv/bin/pip install platformio
 ```
 
-## One-Time Build
+Select your Xcode installation with `xcode-select` if more than one is installed.
 
-```bash
-# iOS side
-cd ~/dev/NotifBridge/ios
-xcodegen generate
-open NotifBridge-iOS.xcodeproj
+### 2. Configure signing
 
-# Mac side
-cd ~/dev/NotifBridge/macos
-xcodegen generate
-open NotifBridge-macOS.xcodeproj
+The projects intentionally do not contain a developer team ID. Use your own team
+and unique bundle identifiers. Replace `com.shinvou.NotifBridge` consistently in
+both project specifications, entitlements, extension metadata and Swift sources,
+including the app-group and shared Keychain identifiers. Keep extension bundle
+identifiers under the iOS host application's identifier.
+
+Generate the projects:
+
+```sh
+xcodegen generate --spec ios/project.yml
+xcodegen generate --spec macos/project.yml
+open ios/NotifBridge-iOS.xcodeproj
+open macos/NotifBridge-macOS.xcodeproj
 ```
 
-Team ID `N8YZB43954` is wired into both `project.yml` files. Change
-`DEVELOPMENT_TEAM` if using a different account.
+Set your team for the host apps and all three extensions. Provision the declared
+accessory data-provider, transport-security and transport-extension entitlements.
+An ordinary unsigned or simulator build is not sufficient for device use.
+Changes made only in generated Xcode projects are overwritten by XcodeGen; keep
+your signing settings locally or pass `DEVELOPMENT_TEAM=YOUR_TEAM` to xcodebuild.
 
-## Run
+### 3. Build and flash the relay
 
-1. **Mac**: build and run `NotifBridge` (mac target). The window should show
-   that it is advertising as `NotifBdg`. Approve any Bluetooth permission prompt.
-2. **iPhone**: build and run `NotifBridge` on the real iOS 26.5 device.
-3. **iPhone**: tap **Pair accessory…**. In the ASK picker, select
-   **NotifBridge Mac**. After bonding, the button changes to **Accessory paired**.
-4. **iPhone**: tap **Request notification forwarding** and allow the apps you
-   want to forward. On later launches, the app refreshes stored forwarding
-   status automatically after ASK activation.
-5. **iPhone**: trigger a notification (or use the test harness — see below).
-6. **Mac**: the decrypted title + body appear in the receiver window. Logs show
-   `decrypted NB from MB sess=...` followed by `HPKE-PLAINTEXT ascii=...`.
+Connect the ESP32 with a data-capable USB cable:
 
-## Automated End-to-End Test
-
-```bash
-./scripts/test-e2e.sh                # random body
-./scripts/test-e2e.sh hpke-probe-005 # known body for grepping
+```sh
+PIO="$PWD/.venv/bin/pio" bash scripts/esp32-build.sh
+PIO="$PWD/.venv/bin/pio" bash scripts/esp32-flash.sh
 ```
 
-The script launches the iPhone app with `--send-test-notif --test-notif-body=<body>`,
-waits 15s, then greps the Mac receiver log. ✅ when the unique body string is
-found in the decrypted plaintext. The harness auto-retries once on a no-decrypt
-miss (see Known Issues below).
+PlatformIO detects the serial port. If multiple devices are connected, pass
+`--upload-port /dev/cu.YOUR_PORT` to the flash script. The relay advertises as
+`NotifBdg`. This firmware uses Bluetooth; Wi-Fi credentials are not required.
 
-Always run this regression after touching any Swift source, `Info.plist`,
-entitlements, or `project.yml` — a green build does not prove the pipeline still
-works.
+**Do not erase flash during routine updates:** erasing also deletes Bluetooth
+bonds and requires re-pairing. `scripts/esp32-erase.sh` is a recovery tool only.
 
-## Known Issues
+### 4. Run both apps and pair
 
-**bluetoothd intermittently flags the Transport extension as a non-extension.**
-At XPC check-in time, bluetoothd sometimes records the TransportApp extension
-as `isExtension false` instead of `isExtension true`. When that happens, the
-session is sent to TCC's bundle-list path with `appAuthorizationHasBeenChecked: 0`,
-bluetoothd never raises the central state to `On` for that session, and the
-extension's `CBCentralManager` stays at `state=4 (poweredOff)` — `attemptConnect`
-guards out and no BLE writes happen. Most common on the first launch after a
-reinstall. Mitigations:
+1. Build and run the Mac application, and allow Bluetooth and notifications.
+2. Build and run the iOS application on your real iPhone.
+3. Use the iPhone's accessory picker to pair the relay, then enable forwarding
+   for your chosen apps.
+4. Open **Notification inbox** from the Mac menu-bar item.
+5. Trigger a real notification on the iPhone and check the Mac.
 
-- Run `scripts/test-e2e.sh`; it auto-retries once on no-decrypt.
-- Manually re-launch the iPhone app and trigger another notification; the next
-  process is almost always classified correctly.
-- Reinstalls reset TCC + per-app forwarding caches and make the misclassification
-  more likely on the first attempt.
+Install app updates in place to preserve pairing and local data. Keep both apps
+and the relay on compatible versions of this repository's protocol.
 
-Pre-warming `CBCentralManager` eagerly in `TransportEventHandler.init` does NOT
-help — it shifts the failure to `state=2 (unsupported)` because DeviceAccess
-hasn't granted Bluetooth yet at that point.
-
-## What Success Looks Like
-
-Useful iPhone log lines:
+## How it works
 
 ```text
-deviceaccessd: Issuing sandbox extension mach: Bluetooth
-TransportSecurityExtension: direct BLE wrote ShareKeyEvent (...B)
-TransportAppExtension: messageReceived ...B
-TransportAppExtension: direct BLE wrote ...B
-DataProviderExtension: addNotification ...
+iPhone notification → DataProvider → iOS encrypted transport
+                    → Bluetooth → ESP32 → Bluetooth → Mac
+
+Mac action → encrypted reverse command → ESP32 → iPhone transport
+           → DataProvider → original notification action → result
 ```
 
-Mac receiver log lines:
+Three iOS extensions handle content, security and transport. The Mac decrypts
+messages, updates its local inbox and submits native notifications. Chunk
+acknowledgments and a separate Mac acceptance receipt support retries without
+posting duplicates. Key preparation and activation are journaled so interrupted
+extension processes can recover.
 
-```text
-keySharing reassembled NB → ShareKeyEvent
-keys installed: id=… cipher=XWing v=Version1 …
-notification reassembled NB → NotificationEnvelope
-decrypted NB from MB sess=…
-HPKE-PLAINTEXT ascii=<title><body><source>…
+## Privacy and limitations
+
+- No cloud service is required. Notification content is stored locally on the
+  Mac, up to 100 entries and an 8 MiB content budget. Deleting Mac history does
+  not clear the iPhone.
+- Bluetooth pairing and the relay are part of the trust boundary. Key material
+  is transported during setup; do not treat the ESP32 as an untrusted device.
+  This project has not received an independent security audit.
+- macOS permissions, Focus and alert style determine whether a submitted
+  notification becomes a visible banner. Acceptance is not proof of a visible
+  banner or audible sound.
+- Fresh quiet iPhone notifications alert on Mac by default; this is configurable.
+  Sound follows the Mac toggle. Old notifications remain in history without
+  being re-alerted.
+- Clear and reply require an iPhone session. A timeout can leave an action's
+  outcome uncertain; retrying a reply may send it twice. Retry deduplication is
+  process-local, not an exactly-once guarantee.
+- Retries and buffers are bounded. Extended outages or process termination may
+  lose notifications. FIFO transport and serialized native submissions reduce
+  reordering, but cannot guarantee original-time popup order across delayed
+  iOS callbacks or reconnects.
+- Native entries retain their initial content; updates refresh inbox history
+  without reposting a banner. NotifBridge's badge remains the notification's
+  app identity even when source artwork appears as the avatar.
+- Attachments are bounded (256 KiB each, 1 MiB total); some rich formats cannot
+  be previewed. Background execution remains controlled by iOS.
+
+## Tests
+
+On an Apple silicon Mac with the required SDK:
+
+```sh
+bash scripts/test-offline.sh
 ```
 
-## Troubleshooting
+This runs wire/history, receiver, BLE writer, native actions, ordering,
+restoration, delivery and real CryptoKit regressions. It does not require paired
+hardware and does not prove end-to-end delivery.
 
-| Outcome | Meaning |
-|---|---|
-| Pair picker does not show Mac | `NSAccessorySetupBluetoothServices` UUID mismatch, Mac not advertising, or `NotifBdg` name filter mismatch. |
-| Pair picker errors with `ASErrorDomain 700` | User cancelled. Retry pairing. |
-| `requestForwarding` throws `unsupportedPlatform` | Apple Account / platform is outside Apple's supported region. |
-| Forwarding status shows `—` briefly on launch | ASK has not emitted `.activated` yet. The app now refreshes status automatically once the paired accessory appears. |
-| Forwarding is allowed but extensions never launch | Check `deviceaccessd` for entitlement, provisioning, or plist errors before looking at app logs. |
-| Sandbox deny for `com.apple.server.bluetooth.le.att.xpc` | CoreBluetooth was created too early or outside the DeviceAccess-granted extension context. Keep the writer lazy inside Security/Transport handlers. |
-| Mac receives encrypted bytes but cannot decrypt | HPKE ciphersuite, key material, or `info` context mismatch. The demo currently uses `.xWing`. |
-| Decrypted but garbled body | Wire format mismatch between the iOS encoder and Mac receiver parser. |
+For a paired, unlocked iPhone and a running relay:
 
-## Extension BLE Notes
-
-The active path is direct CoreBluetooth from the Security and Transport
-extensions. The host app does not broker extension data.
-
-Important details:
-
-- `TransportEventHandler` sets `session.transport = .bluetooth`.
-- Security and Transport handlers store `AccessoryBLEWriter` as a `lazy var`.
-  This delays `CBCentralManager` creation until the system has invoked the
-  extension for a paired accessory.
-- `AccessoryBLEWriter` creates `CBCentralManager` with
-  `CBCentralManagerOptionDeviceAccessForMedia: true`.
-- The writer retrieves the bonded peripheral from `ASAccessorySession` and
-  writes framed chunks (`--START--`, payload chunks, `--END--`) to the target
-  characteristic.
-- App Group files, App Group UserDefaults, keychain IPC, and loopback networking
-  were denied from the extension sandbox. They remain documented in
-  `docs/FINDINGS.md` as negative evidence.
-
-## HPKE Decryption
-
-Ciphersuite: `XWingMLKEM768X25519_SHA256_AES_GCM_256`. Apple does not document
-the `info` value used for `AccessoryTransportSession` payload encryption. Found
-empirically:
-
-```swift
-let protocolInfo  = "\(cipherStr)-\(version)-\(identifier)"          // "XWing-Version1-<accessory-uuid>"
-let exportContext = "\(protocolInfo)-HostToAccessory-\(sessionID)"
-
-let recipient = try HPKE.Recipient(
-    privateKey: privateKey, ciphersuite: .XWingMLKEM768X25519_SHA256_AES_GCM_256,
-    info: Data(protocolInfo.utf8), encapsulatedKey: encapsulatedKey
-)
-let secret    = try recipient.exportSecret(context: Data(exportContext.utf8), outputByteCount: 32)
-let plaintext = try AES.GCM.open(AES.GCM.SealedBox(combined: ciphertext),
-                                 using: SymmetricKey(data: secret))
+```sh
+xcrun devicectl list devices
+DEVICE=YOUR_IPHONE_ID MAC_APP=/Applications/NotifBridge.app bash scripts/test-e2e.sh
+# Optional: also exercise clearing the synthetic notification on iPhone
+DEVICE=YOUR_IPHONE_ID MAC_APP=/Applications/NotifBridge.app CLEAR_ON_IPHONE=1 bash scripts/test-e2e.sh
 ```
 
-No AAD. Ciphertext is the AES-GCM `SealedBox.combined` form (nonce ‖ ciphertext ‖
-tag). Implemented in `macos/NotifBridge/HPKEDecryptor.swift`. See
-`docs/FINDINGS.md` for the full discovery context.
+The live test restarts the Mac app and launches the iPhone app. It checks a
+synthetic receipt marker and, optionally, the iPhone clear acknowledgment.
+Visible banners and actual third-party reply delivery require separate checks.
+The iOS UI setup test changes pairing/forwarding permissions and is opt-in.
 
-## Sanity Check Builds
+## Project layout
 
-```bash
-cd ~/dev/NotifBridge/ios && xcodebuild -project NotifBridge-iOS.xcodeproj \
-  -scheme NotifBridge -sdk iphoneos -destination 'generic/platform=iOS' \
-  CODE_SIGNING_ALLOWED=NO build
+- `ios/` — SwiftUI companion app and three accessory extensions.
+- `macos/` — menu-bar app, native notifications and inbox.
+- `shared/` — wire protocol, receipts, key exchange and GATT constants.
+- `esp32/` — PlatformIO BLE relay firmware.
+- `scripts/` — build helpers and regression tests.
 
-cd ~/dev/NotifBridge/macos && xcodebuild -project NotifBridge-macOS.xcodeproj \
-  -scheme NotifBridge CODE_SIGNING_ALLOWED=NO build
-```
-
-Both should print `** BUILD SUCCEEDED **`.
-
-## Useful Logs
-
-```bash
-# Mac receiver
-log stream --predicate 'subsystem CONTAINS "NotifBridge"' --info
-
-# iPhone via Console.app or idevicesyslog
-log stream --predicate 'subsystem CONTAINS "NotifBridge" OR
-                        subsystem == "com.apple.deviceaccessd" OR
-                        subsystem == "com.apple.CoreBluetooth"' --info
-```
-
-The first sign of provisioning, plist, or entitlement trouble usually lands in
-`com.apple.deviceaccessd` before either of our subsystems logs anything.
-
-## Cleanup
-
-To repair if pairing gets stuck:
-
-- iPhone: Settings → Privacy & Security → Accessories → remove
-  **NotifBridge Mac**.
-- Mac: relaunch `NotifBridge` for a fresh advertisement.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development and bug reports,
+[CHANGELOG.md](CHANGELOG.md) for release notes, and [LICENSE](LICENSE) for the MIT license.
