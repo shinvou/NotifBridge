@@ -30,6 +30,7 @@ final class ESP32Bridge: NSObject {
     private var reverseWriteChar: CBCharacteristic?
     private var connectFallbackTask: Task<Void, Never>?
     private var didConnect = false
+    private var receiverReadyTask: Task<Void, Never>?
 
     private let hpke = HPKEDecryptor()
     private var hpkeReady = false
@@ -198,6 +199,8 @@ extension ESP32Bridge: CBCentralManagerDelegate {
         NSLog("[NB] didDisconnect err=%@ domain=%@ code=%d", error?.localizedDescription ?? "nil", domain, code)
         log.notice("didDisconnect err=\(error?.localizedDescription ?? "nil", privacy: .public) — reconnecting")
         Task { @MainActor in
+            receiverReadyTask?.cancel()
+            receiverReadyTask = nil
             updateState("ESP32 disconnected — reconnecting…", ready: false)
             keyNotifyChar = nil
             notifNotifyChar = nil
@@ -243,9 +246,7 @@ extension ESP32Bridge: CBPeripheralDelegate {
                 default: break
                 }
             }
-            if keyNotifyChar != nil && notifNotifyChar != nil {
-                updateState("subscribed — waiting for iPhone via ESP32", ready: true)
-            }
+            announceReceiverReadiness()
 
         }
     }
@@ -255,6 +256,10 @@ extension ESP32Bridge: CBPeripheralDelegate {
                                 error: (any Error)?) {
         NSLog("[NB] didUpdateNotificationState %@ notifying=%d err=%@", ch.uuid.uuidString, ch.isNotifying ? 1 : 0, error?.localizedDescription ?? "nil")
         log.notice("didUpdateNotificationState \(ch.uuid.uuidString, privacy: .public) notifying=\(ch.isNotifying, privacy: .public) err=\(error?.localizedDescription ?? "nil", privacy: .public)")
+        Task { @MainActor in
+            guard error == nil, p === peripheral else { return }
+            announceReceiverReadiness()
+        }
     }
 
     nonisolated func peripheral(_ p: CBPeripheral,
@@ -272,6 +277,8 @@ extension ESP32Bridge: CBPeripheralDelegate {
 
 extension ESP32Bridge {
     private func handleChunk(_ data: Data, isKeys: Bool) {
+        if !isKeys { receiverReadyTask?.cancel() }
+
         if data == startToken {
             if isKeys { keyBuffer = .init(); keyAssembling = true }
             else      { notifBuffer = .init(); notifAssembling = true }
@@ -394,6 +401,22 @@ extension ESP32Bridge {
         let envelope = try JSONEncoder().encode(NotificationEnvelope(sessionID: sessionID, data: ciphertext))
         try writeReverse(envelope)
         log.notice("reverse command transmitted (\(payload.count, privacy: .public) bytes)")
+    }
+
+    private func announceReceiverReadiness() {
+        guard receiverReadyTask == nil, keyNotifyChar?.isNotifying == true,
+              notifNotifyChar?.isNotifying == true, reverseWriteChar != nil else { return }
+        updateState("subscribed — waiting for iPhone via ESP32", ready: true)
+        receiverReadyTask = Task { @MainActor [weak self] in
+            // Retry briefly if the phone has not subscribed yet. Stop as soon as
+            // a notification chunk arrives, so long transfers are not restarted.
+            for _ in 0..<6 {
+                guard !Task.isCancelled, let self else { return }
+                do { try self.writeReverse(Data("NB-RECEIVER-READY-1".utf8)) }
+                catch { log.error("receiver ready signal failed: \(error.localizedDescription, privacy: .public)") }
+                do { try await Task.sleep(for: .seconds(10)) } catch { return }
+            }
+        }
     }
 
     private func writeReverse(_ envelope: Data) throws {

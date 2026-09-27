@@ -39,6 +39,7 @@ final class AccessoryBLEWriter: NSObject, @unchecked Sendable {
     private var chunkReceipt = Data()
     private var attAcknowledged = false
     private var relayAcknowledged = false
+    private var restartAfterATT = false
 
     private struct PendingWrite {
         let id = UUID()
@@ -118,6 +119,7 @@ final class AccessoryBLEWriter: NSObject, @unchecked Sendable {
             return
         }
         activeWrite = item
+        restartAfterATT = false
         let maximum = p.maximumWriteValueLength(for: .withResponse)
         // One receipt should cover one relay indication, not a long write that
         // becomes several separately acknowledged packets on the Mac link.
@@ -128,6 +130,24 @@ final class AccessoryBLEWriter: NSObject, @unchecked Sendable {
         }
         chunks.append(Data("--END--".utf8))
         chunkIndex = 0
+        sendCurrentChunk(p, ch)
+    }
+
+    private func receiverBecameReady() {
+        guard !stopped else { return }
+        guard activeWrite != nil else { drainPending(); return }
+        // A new receiver has no partial frame. Restart at START, but never issue
+        // another ATT write while the preceding one is outstanding.
+        restartAfterATT = true
+        if attAcknowledged, let p = peripheral, let item = activeWrite,
+           let ch = characteristics[item.target] { restartForReceiver(p, ch) }
+    }
+
+    private func restartForReceiver(_ p: CBPeripheral, _ ch: CBCharacteristic) {
+        restartAfterATT = false
+        progressGeneration &+= 1
+        chunkIndex = 0
+        log.notice("receiver ready — restarting pending frame")
         sendCurrentChunk(p, ch)
     }
 
@@ -298,7 +318,8 @@ extension AccessoryBLEWriter: CBCentralManagerDelegate, CBPeripheralDelegate {
             let message = reverseBuffer
             reverseBuffer.removeAll()
             assemblingReverse = false
-            if !message.isEmpty { onMessage?(message) }
+            if message == Data("NB-RECEIVER-READY-1".utf8) { receiverBecameReady() }
+            else if !message.isEmpty { onMessage?(message) }
         } else if assemblingReverse {
             guard reverseBuffer.count + data.count <= NotifWire.maxEnvelopeBytes else {
                 reverseBuffer.removeAll()
@@ -366,6 +387,7 @@ extension AccessoryBLEWriter: CBCentralManagerDelegate, CBPeripheralDelegate {
             log.notice("ATT acknowledgment chunk=\(self.chunkIndex, privacy: .public) of \(self.chunks.count, privacy: .public)")
         }
         attAcknowledged = true
-        advanceIfAcknowledged(p, ch)
+        if restartAfterATT { restartForReceiver(p, ch) }
+        else { advanceIfAcknowledged(p, ch) }
     }
 }

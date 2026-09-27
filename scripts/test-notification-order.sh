@@ -31,6 +31,7 @@ private var pendingWrites: [PendingWrite] = []
 private var activeWrite: PendingWrite?
 var chunks: [Data] = []
 var chunkIndex = 0
+var restartAfterATT = false
 var chunkReceipt = Data()
 var attAcknowledged = true, relayAcknowledged = true
 var progressGeneration: UInt64 = 0

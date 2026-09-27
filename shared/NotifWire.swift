@@ -177,10 +177,9 @@ extension NotifWire {
                 else { notifications.insert(n, at: 0) }
                 revisions[n.id] = event.sentAt
                 trim()
-                // Quiet alerts are an explicit Mac preference. Bound freshness
-                // so reconnect history cannot produce a burst of old banners.
-                let age = Date().timeIntervalSince(n.deliveryDate)
-                let quietAlert = alertQuietNotifications && age >= -60 && age <= 300
+                // Explicit Mac preference also covers previously unseen messages
+                // recovered after an outage. Existing IDs still cannot re-alert.
+                let quietAlert = alertQuietNotifications
                 return Change(notification: n, shouldAlert: event.kind == .add && existing == nil
                     && (quietAlert || (n.shouldAlert && !n.isSuppressedByFocus)))
             case .remove:

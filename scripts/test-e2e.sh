@@ -77,8 +77,8 @@ PYCONFIG
                      "quiet notifications must not alert twice")
         quiet.notificationIdentifier = "quiet-old"
         quiet.deliveryDate = Date().addingTimeInterval(-301)
-        precondition(!ledger.apply(.init(kind: .add, notification: quiet), alertQuietNotifications: true).shouldAlert,
-                     "historical replay must stay quiet")
+        precondition(ledger.apply(.init(kind: .add, notification: quiet), alertQuietNotifications: true).shouldAlert,
+                     "newly recovered quiet notifications must alert when explicitly enabled")
         quiet.notificationIdentifier = "quiet-focus"
         quiet.deliveryDate = Date()
         quiet.isSuppressedByFocus = true
@@ -422,6 +422,26 @@ final class ASAccessorySession {
         precondition(phone.writes.last!.dropFirst(20) == Data("--START--".utf8), "interrupted media restarts with a clean frame")
         for _ in 0..<21 { acknowledgePacket() }
         try await artwork.value
+        let recoveryStart = phone.writes.count
+        let recovery = Task { try await reverse.write(Data(repeating: 6, count: 1500), to: target) }
+        try await waitForWrite(after: recoveryStart)
+        acknowledgePacket() // START confirmed; data packet in flight.
+        let staleReceipt = Data("NBA1".utf8) + phone.writes.last!.dropFirst(4).prefix(16)
+        let beforeReady = phone.writes.count
+        for part in ["--START--", "NB-RECEIVER-READY-1", "--END--"] {
+            characteristic.value = Data(part.utf8)
+            reverse.peripheral(phone, didUpdateValueFor: characteristic, error: nil)
+        }
+        precondition(phone.writes.count == beforeReady, "recovery must wait for outstanding ATT completion")
+        reverse.peripheral(phone, didWriteValueFor: characteristic, error: nil)
+        precondition(phone.writes.last!.dropFirst(20) == Data("--START--".utf8), "receiver readiness must restart the whole interrupted frame")
+        let restartedCount = phone.writes.count
+        characteristic.value = staleReceipt
+        reverse.peripheral(phone, didUpdateValueFor: characteristic, error: nil)
+        precondition(phone.writes.count == restartedCount, "old relay receipt must not advance restarted frame")
+        for _ in 0..<16 { acknowledgePacket() }
+        try await recovery.value
+        precondition(received == [Data("reply".utf8)], "readiness control must not reach application command parser")
         phone.maximumWriteLength = 512
         let largeStart = phone.writes.count
         let largeStartCount = phone.writes.count

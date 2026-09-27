@@ -125,7 +125,9 @@ Three iOS extensions handle content, security and transport. The Mac decrypts
 messages, updates its local inbox and submits native notifications. Chunk
 acknowledgments and a separate Mac acceptance receipt support retries without
 posting duplicates. Key preparation and activation are journaled so interrupted
-extension processes can recover.
+extension processes can recover. Once the Mac confirms its Bluetooth subscriptions,
+it sends a bounded receiver-ready signal to wake the phone transport and restart
+a pending partial frame. This does not guarantee recovery after process termination.
 
 ## Privacy and limitations
 
@@ -138,9 +140,9 @@ extension processes can recover.
 - macOS permissions, Focus and alert style determine whether a submitted
   notification becomes a visible banner. Acceptance is not proof of a visible
   banner or audible sound.
-- Fresh quiet iPhone notifications alert on Mac by default; this is configurable.
-  Sound follows the Mac toggle. Old notifications remain in history without
-  being re-alerted.
+- Quiet iPhone notifications alert on Mac by default, including previously unseen
+  notifications recovered after an outage; this is configurable. Sound follows
+  the Mac toggle. Already recorded notification IDs do not alert again.
 - Clear and reply require an iPhone session. A timeout can leave an action's
   outcome uncertain; retrying a reply may send it twice. Retry deduplication is
   process-local, not an exactly-once guarantee.
