@@ -46,6 +46,13 @@ final class ASAccessorySession {
 }
 @main struct Regression {
     @MainActor static func settle() async { try? await Task.sleep(for: .milliseconds(30)) }
+    @MainActor static func waitUntil(_ condition: () -> Bool) async {
+        let deadline = Date().addingTimeInterval(10)
+        while !condition() {
+            precondition(Date() < deadline, "Timed out waiting for reconnect callback")
+            try? await Task.sleep(for: .milliseconds(20))
+        }
+    }
     @MainActor static func main() async {
         let monitor = HostBLEMonitor()
         let central = CBCentralManager.latest!
@@ -70,13 +77,13 @@ final class ASAccessorySession {
         precondition(central.cancellations == 1, "Cancel the restored attempt only once")
         peripheral.state = .disconnected
         monitor.centralManager(central, didFailToConnect: peripheral, error: nil)
-        try? await Task.sleep(for: .milliseconds(2100))
+        await waitUntil { central.connections == 1 }
         precondition(central.connections == 1, "Restored peripheral must reconnect without an ASK change")
         peripheral.state = .disconnected
         monitor.centralManager(central, didDisconnectPeripheral: peripheral, error: nil)
         await settle()
         precondition(central.connections == 1, "Disconnect must allow transport teardown before reconnecting")
-        try? await Task.sleep(for: .milliseconds(2100))
+        await waitUntil { central.connections == 2 }
         precondition(central.connections == 2, "Reconnect after transport teardown without reopening the app")
         peripheral.state = .disconnected
         monitor.centralManager(central, didDisconnectPeripheral: peripheral, error: nil)
