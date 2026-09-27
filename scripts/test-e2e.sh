@@ -311,14 +311,22 @@ final class ASAccessorySession {
 }
 @main struct BLEWriterRegression {
     @MainActor static func main() async throws {
+        func waitForWrite(after count: Int) async throws {
+            let deadline = Date().addingTimeInterval(5)
+            while phone.writes.count <= count {
+                guard Date() < deadline else { fatalError("test transport did not receive a write") }
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
         let service = CBUUID(string: "service"), target = CBUUID(string: "target")
         let phone = CBCentralManager.phone
         phone.services = [CBService(service, target)]
         let characteristic = phone.services![0].characteristics![0]
         let writer = AccessoryBLEWriter(category: "test", serviceUUID: service)
         var completed = false
+        let taskStartCount = phone.writes.count
         let task = Task { try await writer.write(Data(repeating: 7, count: 25), to: target); completed = true }
-        try await Task.sleep(for: .milliseconds(30))
+        try await waitForWrite(after: taskStartCount)
         precondition(phone.writes == [Data("--START--".utf8)] && !completed, "wait for each ATT acknowledgment")
         for expectedCount in 2...4 {
             writer.peripheral(phone, didWriteValueFor: characteristic, error: nil)
@@ -329,17 +337,19 @@ final class ASAccessorySession {
         precondition(completed && phone.writes.last == Data("--END--".utf8))
         // A healthy slow frame and the frame queued behind it must outlive the
         // inactivity timeout as long as ATT acknowledgments keep arriving.
-        let slow = Task { try await writer.write(Data(repeating: 3, count: 100), to: target, timeout: 0.12) }
-        try await Task.sleep(for: .milliseconds(20))
-        let queued = Task { try await writer.write(Data([2]), to: target, timeout: 0.12) }
+        let slowStartCount = phone.writes.count
+        let slow = Task { try await writer.write(Data(repeating: 3, count: 100), to: target, timeout: 1.0) }
+        try await waitForWrite(after: slowStartCount)
+        let queued = Task { try await writer.write(Data([2]), to: target, timeout: 1.0) }
         for _ in 0..<10 {
-            try await Task.sleep(for: .milliseconds(45))
+            try await Task.sleep(for: .milliseconds(200))
             writer.peripheral(phone, didWriteValueFor: characteristic, error: nil)
         }
         try await slow.value
         try await queued.value
+        let interruptedStartCount = phone.writes.count
         let interrupted = Task { try await writer.write(Data([8]), to: target) }
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitForWrite(after: interruptedStartCount)
         let reconnect = CBCentralManager(delegate: writer, queue: .main, options: [:])
         phone.state = .disconnected
         writer.centralManager(reconnect, didDisconnectPeripheral: phone, error: nil)
@@ -347,8 +357,9 @@ final class ASAccessorySession {
         writer.centralManager(reconnect, didConnect: phone)
         for _ in 0..<3 { writer.peripheral(phone, didWriteValueFor: characteristic, error: nil) }
         try await interrupted.value
+        let failureStartCount = phone.writes.count
         let failure = Task { try await writer.write(Data([1]), to: target) }
-        try await Task.sleep(for: .milliseconds(30))
+        try await waitForWrite(after: failureStartCount)
         writer.peripheral(phone, didWriteValueFor: characteristic, error: NSError(domain: "ATT", code: 9))
         do { try await failure.value; fatalError("ATT errors must fail the caller") } catch {}
         do { try await writer.write(Data([1]), to: target, timeout: 0.05); fatalError("offline writes must time out") } catch {}
@@ -370,8 +381,9 @@ final class ASAccessorySession {
             reverse.peripheral(phone, didUpdateValueFor: characteristic, error: nil)
         }
         precondition(received == [Data("reply".utf8)], "assemble exactly one reverse frame on the authorized central")
-        let paced = Task { try await reverse.write(Data([7]), to: target, timeout: 0.3) }
-        try await Task.sleep(for: .milliseconds(20))
+        let pacedStartCount = phone.writes.count
+        let paced = Task { try await reverse.write(Data([7]), to: target, timeout: 5.0) }
+        try await waitForWrite(after: pacedStartCount)
         let firstPacketCount = phone.writes.count
         let firstReceipt = Data("NBA1".utf8) + phone.writes.last!.dropFirst(4).prefix(16)
         reverse.peripheral(phone, didWriteValueFor: characteristic, error: nil)
@@ -397,8 +409,9 @@ final class ASAccessorySession {
             reverse.peripheral(phone, didUpdateValueFor: characteristic, error: nil)
             reverse.peripheral(phone, didWriteValueFor: characteristic, error: nil)
         }
+        let artworkStartCount = phone.writes.count
         let artwork = Task { try await reverse.write(Data(repeating: 4, count: 2048), to: target) }
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitForWrite(after: artworkStartCount)
         acknowledgePacket() // START accepted; first media chunk is now in flight.
         let urgent = Task { try await reverse.write(Data([9]), to: target) }
         try await Task.sleep(for: .milliseconds(20))
@@ -411,16 +424,18 @@ final class ASAccessorySession {
         try await artwork.value
         phone.maximumWriteLength = 512
         let largeStart = phone.writes.count
+        let largeStartCount = phone.writes.count
         let large = Task { try await reverse.write(Data(repeating: 5, count: 1000), to: target) }
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitForWrite(after: largeStartCount)
         acknowledgePacket()
         precondition(phone.writes.last!.count <= 220, "a flow-controlled payload must fit one 200-byte relay indication")
         for _ in 0..<6 { acknowledgePacket() }
         try await large.value
         let payload = phone.writes.dropFirst(largeStart + 1).dropLast().reduce(into: Data()) { $0.append($1.dropFirst(20)) }
         precondition(payload == Data(repeating: 5, count: 1000), "single-indication chunks preserve every payload byte")
+        let historyStartCount = phone.writes.count
         let history = Task { try await reverse.write(Data(repeating: 6, count: 8000), to: target) }
-        try await Task.sleep(for: .milliseconds(20))
+        try await waitForWrite(after: historyStartCount)
         acknowledgePacket()
         let fresh = Task { try await reverse.write(Data(repeating: 9, count: 2000), to: target) }
         try await Task.sleep(for: .milliseconds(20))
