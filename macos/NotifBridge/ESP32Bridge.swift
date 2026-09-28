@@ -404,9 +404,11 @@ extension ESP32Bridge {
     }
 
     private func announceReceiverReadiness() {
-        guard receiverReadyTask == nil, keyNotifyChar?.isNotifying == true,
+        guard keyNotifyChar?.isNotifying == true,
               notifNotifyChar?.isNotifying == true, reverseWriteChar != nil else { return }
         updateState("subscribed — waiting for iPhone via ESP32", ready: true)
+        // Subscription state is independent of whether the wake loop already ran.
+        guard receiverReadyTask == nil else { return }
         receiverReadyTask = Task { @MainActor [weak self] in
             // Retry briefly if the phone has not subscribed yet. Stop as soon as
             // a notification chunk arrives, so long transfers are not restarted.

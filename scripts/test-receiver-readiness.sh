@@ -47,6 +47,10 @@ final class Characteristic { var isNotifying = false }
         precondition(h.writes.count == 1, "duplicate callbacks must not send concurrent readiness loops")
         h.receiverReadyTask?.cancel()
         await first?.value
+        h.ready = false // reconnect temporarily reports discovering services
+        h.changed()
+        precondition(h.ready, "confirmed subscriptions must restore status even with an existing cancelled readiness task")
+        precondition(h.writes.count == 1, "status refresh must not start another readiness loop")
         print("PASS: confirmed subscriptions gate readiness; paired-link wake signal is sent once and is cancellable")
     }
 }
