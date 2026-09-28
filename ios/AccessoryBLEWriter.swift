@@ -40,6 +40,7 @@ final class AccessoryBLEWriter: NSObject, @unchecked Sendable {
     private var attAcknowledged = false
     private var relayAcknowledged = false
     private var restartAfterATT = false
+    private var securityBurst = false
 
     private struct PendingWrite {
         let id = UUID()
@@ -120,7 +121,8 @@ final class AccessoryBLEWriter: NSObject, @unchecked Sendable {
         }
         activeWrite = item
         restartAfterATT = false
-        let maximum = p.maximumWriteValueLength(for: .withResponse)
+        securityBurst = reverseUUID != nil && !relayReceipts && ch.properties.contains(.writeWithoutResponse)
+        let maximum = p.maximumWriteValueLength(for: securityBurst ? .withoutResponse : .withResponse)
         // One receipt should cover one relay indication, not a long write that
         // becomes several separately acknowledged packets on the Mac link.
         let size = !relayReceipts ? max(1, maximum) : max(1, min(200, maximum - 20))
@@ -151,7 +153,30 @@ final class AccessoryBLEWriter: NSObject, @unchecked Sendable {
         sendCurrentChunk(p, ch)
     }
 
+    func peripheralIsReady(toSendWriteWithoutResponse p: CBPeripheral) {
+        guard p === peripheral, securityBurst, let item = activeWrite,
+              let ch = characteristics[item.target] else { return }
+        sendSecurityChunks(p, ch)
+    }
+
+    private func sendSecurityChunks(_ p: CBPeripheral, _ ch: CBCharacteristic) {
+        guard let item = activeWrite else { return }
+        while chunkIndex < chunks.count && p.canSendWriteWithoutResponse {
+            p.writeValue(chunks[chunkIndex], for: ch, type: .withoutResponse)
+            chunkIndex += 1
+            progressGeneration &+= 1
+        }
+        guard chunkIndex == chunks.count else { return }
+        // Only queued to Bluetooth: the security handler still awaits the Mac's
+        // durable receipt before clearing its journal or reporting success.
+        activeWrite = nil
+        chunks.removeAll()
+        item.completion(.success(()))
+        drainPending()
+    }
+
     private func sendCurrentChunk(_ p: CBPeripheral, _ ch: CBCharacteristic) {
+        if securityBurst { sendSecurityChunks(p, ch); return }
         attAcknowledged = false
         relayAcknowledged = !relayReceipts
         var data = chunks[chunkIndex]

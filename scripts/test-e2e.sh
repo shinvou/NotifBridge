@@ -275,11 +275,11 @@ protocol CBCentralManagerDelegate: AnyObject {}
 protocol CBPeripheralDelegate: AnyObject {}
 enum CBManagerState: Int { case unknown = 0, poweredOff = 4, poweredOn = 5 }
 enum CBPeripheralState: Int { case disconnected, connecting, connected }
-struct CBCharacteristicProperties { let rawValue = 8 }
+struct CBCharacteristicProperties: OptionSet { let rawValue: Int; static let writeWithoutResponse = Self(rawValue: 4); init(rawValue: Int = 12) { self.rawValue = rawValue } }
 final class CBCharacteristic { let uuid: CBUUID; var value: Data?; var isNotifying = false; let properties = CBCharacteristicProperties(); init(_ id: CBUUID) { uuid = id } }
 final class CBService { let uuid: CBUUID; var characteristics: [CBCharacteristic]?; init(_ id: CBUUID, _ char: CBUUID) { uuid = id; characteristics = [CBCharacteristic(char)] } }
 final class CBPeripheral {
-    enum WriteType { case withResponse }
+    enum WriteType { case withResponse, withoutResponse }
     let identifier = UUID()
     func setNotifyValue(_ value: Bool, for ch: CBCharacteristic) { ch.isNotifying = value }
     var state: CBPeripheralState = .connected
@@ -287,6 +287,7 @@ final class CBPeripheral {
     var delegate: (any CBPeripheralDelegate)?
     var services: [CBService]?
     var writes: [Data] = []
+    var canSendWriteWithoutResponse = false
     var maximumWriteLength = 20
     func maximumWriteValueLength(for type: WriteType) -> Int { maximumWriteLength }
     func writeValue(_ data: Data, for characteristic: CBCharacteristic, type: WriteType) { writes.append(data) }
@@ -472,6 +473,20 @@ final class ASAccessorySession {
         characteristic.value = Data("--START--".utf8)
         reverse.peripheral(phone, didUpdateValueFor: characteristic, error: nil)
         precondition(phone.state == .disconnected)
+        phone.state = .connected
+        let security = AccessoryBLEWriter(category: "security-test", serviceUUID: service, reverseUUID: target, relayReceipts: false)
+        security.centralManagerDidUpdateState(CBCentralManager(delegate: security, queue: .main, options: [:]))
+        security.peripheral(phone, didDiscoverServices: nil)
+        let burstStart = phone.writes.count
+        let burst = Task { try await security.write(Data(repeating: 7, count: 1756), to: target) }
+        try await Task.sleep(for: .milliseconds(20))
+        precondition(phone.writes.count == burstStart, "security burst must obey backpressure")
+        phone.canSendWriteWithoutResponse = true
+        security.peripheralIsReady(toSendWriteWithoutResponse: phone)
+        try await burst.value
+        let frames = Array(phone.writes.dropFirst(burstStart))
+        precondition(frames.first == Data("--START--".utf8) && frames.last == Data("--END--".utf8))
+        precondition(frames.dropFirst().dropLast().reduce(into: Data()) { $0.append($1) } == Data(repeating: 7, count: 1756))
         print("PASS: per-chunk acknowledgment, completion after END acknowledgment, ATT failure, offline/active timeout, late acknowledgment, slow queued transfers and reverse assembly")
     }
 }

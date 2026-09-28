@@ -16,8 +16,9 @@ pre='''import Foundation
 import os
 typealias CBUUID = String
 extension String { var uuidString: String { self } }
-final class CBCharacteristic { var isNotifying = true }
-final class CBPeripheral { enum State: Int { case connected }; enum Write { case withResponse }; var state = State.connected
+struct Properties { static let writeWithoutResponse = Self(); func contains(_ other: Self) -> Bool { false } }
+final class CBCharacteristic { var isNotifying = true; let properties = Properties() }
+final class CBPeripheral { enum State: Int { case connected }; enum Write { case withResponse, withoutResponse }; var state = State.connected
 func maximumWriteValueLength(for: Write) -> Int { 512 }
 }
 final class Harness: @unchecked Sendable {
@@ -32,6 +33,7 @@ private var activeWrite: PendingWrite?
 var chunks: [Data] = []
 var chunkIndex = 0
 var restartAfterATT = false
+var securityBurst = false
 var chunkReceipt = Data()
 var attAcknowledged = true, relayAcknowledged = true
 var progressGeneration: UInt64 = 0
